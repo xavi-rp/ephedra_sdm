@@ -68,12 +68,13 @@ fun_proj <- function(x){ # to project all the rasters of the folder
   } 
 }
 
-
 fun_proj(lst_predictors)
 
 
-plot(bio19)
-str(bio19)
+bio1 <- raster(paste0("/Users/xavi/Dropbox/ephedra_balears/data/variables_cneor/etrs89/", "bio1.asc"))
+bio1
+plot(bio1)
+rm(bio19)
 contour(bio19, add=TRUE)
 
 #### Importing climatic data from WorldClim (19 bioclimatic variables in a RasterStack)
