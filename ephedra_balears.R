@@ -21,7 +21,7 @@
 
 getwd()
 setwd("~/Dropbox/ephedra_balears/data")
-#load("~/Documents/ephedra_balears/data/ephedra_ws.RData")
+#load("~/Dropbox/ephedra_balears/data/ephedra_ws.RData")
 
 #### packages ####
 library(sp)
@@ -123,9 +123,13 @@ bioclim_16_ETRS89 <- projectRaster(bioclim_16_WGS84, crs="+init=EPSG:25831") #to
 
 # Clipping the variables with a polygon (Balearic Is.)
 
-crop(bioclim_16_ETRS89, balearix_ETRS89, filename="bioc_16_bal")
+crop(bioclim_16_ETRS89, balearix_ETRS89, filename="bioc_16_bal", overwrite = TRUE)
 bioc_16_bal <- raster("bioc_16_bal")
 plot(bioc_16_bal)
+
+# Aggragating to 1x1 km
+aggregate(bioc_16_bal, fact = c(1000/657, 1000/926), fun = mean, expand=TRUE, na.rm=TRUE, filename="bioc_16_bal_agg", overwrite=TRUE)  # upscaling ( to lower resolution: larger cells)
+
 
 
 #### Importing a Digital Elevation Model (DEM) ####
@@ -154,10 +158,26 @@ elev_WGS84 <- elev
 proj4string(elev_WGS84) <- CRS("+init=epsg:4326") # giving coord system, etc
 elev_ETRS89 <- projectRaster(elev_WGS84, crs="+init=EPSG:25831") #to ETRS89
 
-crop(elev_ETRS89, balearix_ETRS89, filename="elev_bal", overwrite=TRUE)
+crop(elev_ETRS89, balearix_ETRS89, filename="elev_bal", overwrite=TRUE) # croping to Balearics
 elev_bal <- raster("elev_bal")
+
+resample(elev_bal, bioc_16_bal, method="bilinear", filename="elev_bal_agg", overwrite=TRUE)  # upscaling ( to lower resolution: larger cells)
+elev_bal <- raster("elev_bal_agg")
+
 plot(elev_bal)
 
+
+#### Distance to the coast ####
+
+mask_inv <- mask
+mask_inv[is.na(mask_inv)] <- 2
+mask_inv[mask_inv == 1] <- NA
+
+dist_coast <- distance(mask_inv)
+resample(dist_coast, bioc_16_bal, method="bilinear", filename="dist_coast_agg", overwrite=TRUE)  # upscaling ( to lower resolution: larger cells)
+dist_coast <- raster("dist_coast_agg")
+plot(dist_coast)
+plot(balearix_ETRS89, add=TRUE)
 
 #
 
