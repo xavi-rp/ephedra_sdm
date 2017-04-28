@@ -29,11 +29,14 @@ library(rgdal)
 library(raster)
 library(graphics)
 library(rgeos)
+library(dismo)
+library(devtools)
 
 
 #### Importing and mapping presences on the Balearics ####
+# Data downloaded from Bioatles (http://bioatles.caib.es/serproesfront/VisorServlet), on 01/07/2015
 
-ephedra_bioatles <- read.table("dades_bioatles.txt", sep="\t", header = TRUE)
+ephedra_bioatles <- read.table("dades_bioatles.txt", sep="\t", header = TRUE) 
 head(ephedra_bioatles)
 summary(ephedra_bioatles)
 
@@ -48,11 +51,11 @@ CRS.new <- CRS("+init=EPSG:25831") #new Coordinate Reference System to project d
 ephedra_ETRS89 <- spTransform(ephedra_bioatles, CRS.new)  #projecting 
 str(ephedra_ETRS89)
 summary(ephedra_ETRS89)
-write.csv(ephedra_ETRS89, file = "ephedra_ETRS89.csv")
+write.csv(ephedra_ETRS89, file = "ephedra_ETRS89.csv", row.names = FALSE)
 
 
 
-#### Predictors ####
+#### Predictors (from Cneorum/Daphne study) ####
 
 lst_predictors <- list.files(path="~/Dropbox/ephedra_balears/data/variables_cneor", pattern=".asc$", full.names = TRUE)
 lst_predictors
@@ -87,6 +90,11 @@ balearix_ETRS89 <- rasterToPolygons(mask, dissolve=TRUE)
 plot(balearix_ETRS89)
 str(balearix_ETRS89)
 writeOGR(balearix_ETRS89, layer = "balearix_ETRS89", driver = "ESRI Shapefile", dsn = "/Users/xavi/Dropbox/ephedra_balears/data/variables_cneor/etrs89/balearix_ETRS89", verbose = TRUE, overwrite_layer = TRUE)
+
+pdf("Ephedra_bioatles.pdf")
+plot(balearix_ETRS89)
+points(ephedra_ETRS89, cex=0.01, col=2)
+dev.off()
 
 rm(bio2)
 
@@ -124,12 +132,8 @@ bioclim_16_ETRS89 <- projectRaster(bioclim_16_WGS84, crs="+init=EPSG:25831") #to
 # Clipping the variables with a polygon (Balearic Is.)
 
 crop(bioclim_16_ETRS89, balearix_ETRS89, filename="bioc_16_bal", overwrite = TRUE)
-bioc_16_bal <- raster("bioc_16_bal")
+bioc_16_bal <- brick("bioc_16_bal")
 plot(bioc_16_bal)
-
-# Aggragating to 1x1 km
-aggregate(bioc_16_bal, fact = c(1000/657, 1000/926), fun = mean, expand=TRUE, na.rm=TRUE, filename="bioc_16_bal_agg", overwrite=TRUE)  # upscaling ( to lower resolution: larger cells)
-
 
 
 #### Importing a Digital Elevation Model (DEM) ####
@@ -163,6 +167,8 @@ elev_bal <- raster("elev_bal")
 
 resample(elev_bal, bioc_16_bal, method="bilinear", filename="elev_bal_agg", overwrite=TRUE)  # upscaling ( to lower resolution: larger cells)
 elev_bal <- raster("elev_bal_agg")
+elev_bal@data@names <- "elev_bal"
+
 
 plot(elev_bal)
 
@@ -176,10 +182,101 @@ mask_inv[mask_inv == 1] <- NA
 dist_coast <- distance(mask_inv)
 resample(dist_coast, bioc_16_bal, method="bilinear", filename="dist_coast_agg", overwrite=TRUE)  # upscaling ( to lower resolution: larger cells)
 dist_coast <- raster("dist_coast_agg")
+dist_coast@data@names <- "dist_coast"
 plot(dist_coast)
 plot(balearix_ETRS89, add=TRUE)
 
 #
+
+
+#### Selecting non-correlated variables ####
+
+library(virtualspecies)
+
+# Creating a stack with the variables
+
+stack_rstrs <- stack()  # creating a RasterStack (for predictors)
+stack_rstrs <- stack(stack_rstrs, bioc_16_bal, elev_bal, dist_coast)    #filling in the stack
+
+vables_NoC <- removeCollinearity(stack_rstrs,
+                                 multicollinearity.cutoff = 0.85,
+                                 select.variables = TRUE,  # if TRUE, randomly select one variable of the group. If FALSE, returns a list with the groups
+                                 sample.points = FALSE,
+                                 plot = TRUE)
+vables_NoC
+
+dev.copy(pdf, "vars_collinearity.pdf")
+dev.off()   # saving plot
+
+
+# A rasterStack with no-correlated variables
+
+predictors <- subset(stack_rstrs, vables_NoC)
+predictors@layers
+
+
+
+#### Modelling parameters ####
+# ENMEval package
+# Evaluating which is the optimal combination of regularization and features parameters 
+# in order to improve model performance while limiting overfitting.
+# The Akaike Information Criterion corrected for small samples sizes reflects both model
+# goodness-of-fit and complexity and it is independent of the partitioning method because 
+# it is computed with the full set of presences.
+# The model with the lowest AICc value (i.e. Delta_AICc = 0) is considered the best model out 
+# of the current suite of models.
+# Big AUC_diff, equal to overfit models.
+#
+
+install_github("bobmuscarella/ENMeval@master")   #to install the last version of ENMeval from the GitHub repository of Bob Muscarella (https://github.com/bobmuscarella/ENMeval)
+library(ENMeval)
+
+
+# reading presences
+ephedra <- read.csv(file = "ephedra_ETRS89.csv", header = TRUE)
+head(ephedra)
+
+#prevalences table ??
+
+# running ENMEval: https://github.com/bobmuscarella/ENMeval       #source code of the library
+# MaxEnt: Version 3.3.3e, November 2010 (https://github.com/mrmaxent/Maxent/tree/master/ArchivedReleases/3.3.3e)
+
+enm_eval <- ENMevaluate(ephedra, predictors, bg.coords = NULL, occ.grp = NULL,
+                        bg.grp = NULL, RMvalues = seq(0.5, 4, 0.5),
+                        fc = c("L", "LQ", "H", "LQH", "LQHP", "LQHPT"),
+                        categoricals = NULL, n.bg = 10000, method = "randomkfold",
+                        overlap = FALSE, aggregation.factor = c(2, 2),
+                        kfolds = 3, bin.output = FALSE, clamp = TRUE,
+                        rasterPreds = TRUE, parallel = FALSE, numCores = NULL,
+                        progbar = TRUE, updateProgress = FALSE)
+
+enm_eval@results # data.frame with comparison results
+names(enm_eval@results)
+best_comb <- enm_eval@results[enm_eval@results$delta.AICc == 0, ]  # best result (rm, fc)
+
+features <- as.vector(best_comb$features)
+rm <- best_comb$rm
+
+best_model <- enm_eval@models[[18]]   # best model
+response(best_model)   # response curves of the best model
+
+best_model_preds <- enm_eval@predictions[[18]]  # predictions of the best model ("row" format)
+plot(best_model_preds)
+plot(balearix_ETRS89, add=TRUE)
+plot(ephedra_ETRS89, add=TRUE, cex=0.01, col=2)
+
+best_model_preds_log <- predict(best_model, predictors, args = c("outputformat=logistic")) # predictions of the best model ("logistic" format)
+plot(best_model_preds_log)
+
+# saving to a PDF file, with presences (red dots)
+pdf("sdm_ephedra_logistic.pdf")   
+plot(best_model_preds_log)
+dev.off()   # saving plot
+
+#
+
+
+
 
 
 
