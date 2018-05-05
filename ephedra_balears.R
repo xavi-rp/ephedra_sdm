@@ -42,7 +42,7 @@ summary(ephedra_bioatles)
 
 coordinates(ephedra_bioatles) <- c("x", "y")  # set spatial coordinates
 plot(ephedra_bioatles)
-proj4string(ephedra_bioatles) <- CRS("+init=EPSG:23031")  # define projection: European Datum 1950 (31N)
+proj4string(ephedra_bioatles) <- CRS("+init=EPSG:23031")  # define projection: European Datum 1950 (31N) http://spatialreference.org/ref/epsg/etrs89-utm-zone-31n/
 summary(ephedra_bioatles)
 str(ephedra_bioatles)
 
